@@ -36,7 +36,7 @@ app.get('/boardgames', async (req, res) =>{
     }catch(error){
         console.log(error)
         res.status(500).send({
-            error: 'Something went wrong',
+            error: 'Something went wrong!',
             value: error
         });
     }finally {
