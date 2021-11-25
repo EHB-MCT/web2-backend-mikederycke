@@ -1,80 +1,132 @@
-const express = require('express')
-const bodyParser = require('body-parser')
-const fs = require('fs/promises')
-const app = express()
-const port = process.env.PORT || 3000;
+const express = require('express');
+const fs = require('fs/promises');
+const bodyParser = require('body-parser');
+const { MongoClient } = require('mongodb');
+const config = require('./config.json');
 
-//Make sure the files from the folder public are available
+//Create the mongo client to use
+const client = new MongoClient(config.finalUrl);
+
+const app = express();
+const port = 1337;
+
 app.use(express.static('public'));
-
-//Parse all incoming body requests to JSON if possible
 app.use(bodyParser.json());
 
 
+//Root route
 app.get('/', (req, res) => {
-    //redirect the root to the info page. 
-    res.redirect('/info.html');
-})
-
-app.get('/api/exampleData', (req, res) => {
-    let data = {
-        count: 5,
-        exampleData:[
-            {id: 1, name: 'Mike'},
-            {id: 2, name: 'Peter'},
-            {id: 3, name: 'Joni'},
-            {id: 4, name: 'Dennis'},
-            {id: 5, name: 'Jan'},
-        ]
-    }
-    // Send back JSON data
-    res.send(data);
+    res.status(300).redirect('/info.html');
 });
 
-app.post('/api/saveData', async (req, res) => {
-    
-    //Check if the data is present
-    if(!req.body.id || !req.body.name || !req.body.hobby){
-        res.status(400).send('The body has a wrong format. It needs to contain 3 properties: id, name and hobby');
-        //stop the function here
-        return;
-    }else{
-        //Add to the file
-        let filedata = JSON.parse( await fs.readFile('./data/students.json'));
-          
-        // Validation for duplicate data: no same ID's
-        if(filedata.list.find(student => student.id == req.body.id)){
-            //student already exists
-            res.status(401).send('This student already exists. Make sure you pass along the correct id!');
-            //stop the function here
+// Return all boardgames from the database
+app.get('/boardgames', async (req, res) =>{
+
+    try{
+        //connect to the db
+        await client.connect();
+
+        //retrieve the boardgame collection data
+        const colli = client.db('session5').collection('boardgames');
+        const bgs = await colli.find({}).toArray();
+
+        //Send back the data with the response
+        res.status(200).send(bgs);
+    }catch(error){
+        console.log(error)
+        res.status(500).send({
+            error: 'Something went wrong',
+            value: error
+        });
+    }finally {
+        await client.close();
+    }
+});
+
+// /boardgame?id=1234
+app.get('/boardgame', async (req,res) => {
+    //id is located in the query: req.query.id
+    try{
+        //connect to the db
+        await client.connect();
+
+        //retrieve the boardgame collection data
+        const colli = client.db('session5').collection('boardgames');
+
+        //only look for a bg with this ID
+        const query = { bggid: req.query.id };
+
+        const bg = await colli.findOne(query);
+
+        if(bg){
+            //Send back the file
+            res.status(200).send(bg);
             return;
+        }else{
+            res.status(400).send('Boardgame could not be found with id: ' + req.query.id);
         }
-        // Pass along only the fields we need to prevent pollution of data
-        let data = {
-            id: req.body.id,
-            name: req.body.name,
-            hobby: req.body.hobby
-        }
-
-        //adjust the file
-        filedata.count++;
-        filedata.list.push(data);
-
-        //save the file again
-        try{
-           let result = await fs.writeFile('./data/students.json', JSON.stringify(filedata));
-           res.status(201).send('Your data has been succesfully saved with id: ' + req.body.id);
-        }catch(error){
-            res.status(500).send('Something went wrong: ' + JSON.stringify(error));
-        }     
-
-        
+      
+    }catch(error){
+        console.log(error);
+        res.status(500).send({
+            error: 'Something went wrong',
+            value: error
+        });
+    }finally {
+        await client.close();
     }
-    //stop the function here
-    return;
 });
+
+// save a boardgame
+app.post('/saveBoardgame', async (req, res) => {
+
+    if(!req.body.bggid || !req.body.name || !req.body.genre || !req.body.mechanisms
+        || !req.body.description){
+        res.status(400).send('Bad request: missing id, name, genre, mechanisms or description');
+        return;
+    }
+
+    try{
+        //connect to the db
+        await client.connect();
+
+        //retrieve the boardgame collection data
+        const colli = client.db('session5').collection('boardgames');
+
+        // Validation for double boardgames
+        const bg = await colli.findOne({bggid: req.body.bggid});
+        if(bg){
+            res.status(400).send('Bad request: boardgame already exists with bggid ' + req.body.bggid);
+            return;
+        } 
+        // Create the new boardgame object
+        let newBoardgame = {
+            bggid: req.body.bggid,
+            name: req.body.name,
+            genre: req.body.genre,
+            mechanisms: req.body.mechanisms,
+            description: req.body.description
+        }
+        
+        // Insert into the database
+        let insertResult = await colli.insertOne(newBoardgame);
+
+        //Send back successmessage
+        res.status(201).send(`Boardgame succesfully saved with id ${req.body.bggid}`);
+        return;
+    }catch(error){
+        console.log(error);
+        res.status(500).send({
+            error: 'Something went wrong',
+            value: error
+        });
+    }finally {
+        await client.close();
+    }
+});
+
 
 
 app.listen(port, () => {
-  console.log(`Example app listening at http://localhost:${port}`)
+    console.log(`API is running at http://localhost:${port}`);
 })
